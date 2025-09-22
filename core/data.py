@@ -1,0 +1,54 @@
+import pandas as pd
+import yfinance as yf
+
+def get_numeric_close(ticker: str, period: str, interval: str) -> pd.Series:
+    """
+    Downloads with yfinance and returns a numeric Close price Series for `ticker`.
+    Handles single/multi-index columns and coerces to numeric.
+    """
+    df = yf.download(
+        tickers=ticker,          # pass a string, not a list
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False,
+        group_by="column",
+        actions=False
+    )
+
+    if df is None or df.empty:
+        raise ValueError("No data returned from yfinance.")
+
+    # Case A: standard single-ticker columns
+    if "Close" in df.columns and not isinstance(df.columns, pd.MultiIndex):
+        close = df["Close"]
+
+    # Case B: multi-index (e.g., multiple tickers)
+    elif isinstance(df.columns, pd.MultiIndex):
+        if ("Close", ticker) in df.columns:
+            close = df[("Close", ticker)]
+        else:
+            close_cols = [c for c in df.columns if isinstance(c, tuple) and c[0] == "Close"]
+            if not close_cols:
+                raise ValueError(f"'Close' level not found in multi-index columns: {df.columns}")
+            close = df[close_cols[0]]
+
+    # Rare fallback
+    elif isinstance(df, pd.Series):
+        close = df
+    else:
+        if "Adj Close" in df.columns:
+            close = df["Adj Close"]
+        else:
+            raise ValueError(f"Could not locate a 'Close' column. Columns: {df.columns}")
+
+    # Clean
+    close = close.copy()
+    close.index = pd.to_datetime(close.index)
+    close = close.sort_index()
+    close = pd.to_numeric(close, errors="coerce")
+
+    if close.isna().all():
+        raise ValueError("Close series is all NaN after coercion.")
+
+    return close
