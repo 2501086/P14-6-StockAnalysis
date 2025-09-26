@@ -1,7 +1,7 @@
 # app.py
 # Streamlit "mini-TradingView" using your core modules
 #new comment
-import streamlit as st
+import streamlit as st #import file streamlit here
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
