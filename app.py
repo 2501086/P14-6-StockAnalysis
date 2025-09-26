@@ -1,6 +1,6 @@
 # app.py
 # Streamlit "mini-TradingView" using your core modules
-
+#new comment
 import streamlit as st
 import pandas as pd
 import numpy as np
