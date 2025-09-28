@@ -1,0 +1,116 @@
+import pandas as pd
+import yfinance as yf
+from datetime import datetime
+import math
+
+def get_numeric_close(ticker: str, period: str, interval: str) -> pd.Series:
+    """
+    Downloads with yfinance and returns a numeric Close price Series for `ticker`.
+    Handles single/multi-index columns and coerces to numeric.
+    (Minimized use of pandas utilities; pure-Python where possible.)
+    """
+    df = yf.download(
+        tickers=ticker,
+        period=period,
+        interval=interval,
+        auto_adjust=False,
+        progress=False,
+        group_by="column",
+        actions=False
+    )
+
+    if df is None or getattr(df, "empty", True):
+        raise ValueError("No data returned from yfinance.")
+    #getattr means get attribute this means from the imported YahooFinance part if the 
+    #variable df is empty or has a error it will come back as True and thus
+    #raise the valueerror
+
+    '''first part of the code means that in datadrame if there is no closein the columbs return the value
+as a empty list, this is different from the top code cause top part is checking if dataframe
+has anything empty, for this is checking if there is a column called close. and means second 
+criteria must not be..., isinstance basically checks(object,type) this case checking if
+if the dataframe column is multiindex, multiindex means there is two ticker
+so if it meets both critiria close will euqal to the close column from the dataframe'''
+    if ("Close" in getattr(df, "columns", [])) and not isinstance(df.columns, pd.MultiIndex):
+        close = df["Close"]
+
+    elif isinstance(df.columns, pd.MultiIndex):
+        if ("Close", ticker) in df.columns:
+            close = df[("Close", ticker)]
+    #for multiindex, the function will get the first one e.g. if both APPL and MSFT have close column
+    #but user key in APPL first , user will get APPL close value only
+        else:
+            close_cols = [c for c in df.columns if isinstance(c, tuple) and c and c[0] == "Close"]
+    #this line of code is defensive is just checking in the dataframe if there is a "close" column with something
+    #and if there is they will just put it under close_cols
+            if not close_cols:
+                raise ValueError(f"'Close' level not found in multi-index columns: {df.columns}")
+            close = df[close_cols[0]]
+    #if found a close_cols value store it to close but only the first one found
+    elif isinstance(df, pd.Series):
+        close = df
+    #if dataframe is already in series can just store it as close
+    else:
+        if "Adj Close" in getattr(df, "columns", []):
+            close = df["Adj Close"]
+        #last check to see if inside the dataframe if there is no close column check for adjusted close column
+        else:
+            raise ValueError(f"Could not locate a 'Close' column. Columns: {getattr(df, 'columns', None)}")
+
+    raw_index = list(close.index)
+    #the index of close is usually the date change that into a list now and store it under raw_index, this is so we can use to loop
+    idx_parsed = []
+    for ts in raw_index:
+        # If it's already a datetime-like (Timestamp/datetime), keep it.
+        if hasattr(ts, "year") and hasattr(ts, "month") and hasattr(ts, "day"):
+        #check if it has the attribute so if it has a year month and day if yes add it to te list
+            idx_parsed.append(ts)
+        else:
+            # Try ISO parse; if it fails, leave as-is.
+            # (This keeps behavior safe but minimizes pandas-specific ops.)
+            try:
+                idx_parsed.append(datetime.fromisoformat(str(ts)))
+            except Exception:
+                idx_parsed.append(ts)
+
+    #now we are doing for the close values
+    raw_values = list(close.values)
+    vals_parsed = []
+    for v in raw_values:
+        try:
+            # Many inputs are already float; this also handles Decimal/str
+            vals_parsed.append(float(v))
+        except Exception:
+            vals_parsed.append(float("nan"))
+    #if can store the value if not store it as nan
+
+    # CHANGED: avoid sort_index(); sort by index using pure Python and rebuild
+    paired = list(zip(idx_parsed, vals_parsed))
+    #put the 2 variables together into one list
+    try:
+        paired.sort(key=lambda x: x[0])
+    #sorting the first value which is the date
+    except Exception:
+        # If index elements aren’t comparable, skip sorting (matches “best effort”)
+        pass
+
+    sorted_idx = [p[0] for p in paired]
+    sorted_vals = [p[1] for p in paired]
+    #now that its sorted get another list
+
+    # CHANGED: rebuild a fresh Series without pandas cleaning helpers
+    close_clean = pd.Series(sorted_vals, index=sorted_idx, name=getattr(close, "name", "Close"))
+
+    # CHANGED: avoid close.isna().all(); do a pure-Python NaN check
+    all_nan = True
+    for x in sorted_vals:
+        # NaN is the only float where (x != x) is True
+        if not (isinstance(x, float) and math.isnan(x)):
+            all_nan = False
+            break
+        #if x isnt a a float Nan, meaning it isa real number, then mark that not all values are nan
+    if all_nan:
+        raise ValueError("Close series is all NaN after coercion.")
+    #if everything is nan then stop the program
+
+    return close_clean
